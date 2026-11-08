@@ -1,0 +1,2 @@
+{ "appId": "ca.adamhoward.armory", "appName": "Adam's Armory", "webDir": "www",
+  "android": { "allowMixedContent": false, "webContentsDebuggingEnabled": false } }
