@@ -396,6 +396,28 @@ const Ballistics = (() => {
 
 /* Preset rifles & loads. Factory MV is at the manufacturer's test barrel;
  * the app adjusts to your barrel length using fps-per-inch. */
+/* .22 LR ammo shared by every .22 LR rifle. Each rifle gets its own load ids
+ * (prefix) so chrono values and DOPE stay separate per gun. */
+const RIMFIRE_LOAD_DATA = [
+      { id: '22-ccisv', name: 'CCI Standard Velocity', weightGr: 40, model: 'G1', bc: 0.128, factoryMv: 1070, testBarrelIn: 20.5,
+        source: 'CCI SV 40gr LRN: 1070 fps; BC est. .128' },
+      { id: '22-minimag', name: 'CCI Mini-Mag', weightGr: 40, model: 'G1', bc: 0.130, factoryMv: 1235, testBarrelIn: 20.5,
+        source: 'CCI Mini-Mag #30: 1235 fps, G1 .130 (998 fps @100yd)' },
+      { id: '22-blazer', name: 'CCI Blazer', weightGr: 40, model: 'G1', bc: 0.133, factoryMv: 1235, testBarrelIn: 20.5,
+        source: 'CCI Blazer #21: 1235 fps, G1 .133 (1001 fps @100yd)' },
+      { id: '22-eleymatch', name: 'Eley Match 42gr', weightGr: 42, model: 'RA4', bc: 0.112, factoryMv: 1065, testBarrelIn: 20.5,
+        source: 'Eley: BC 0.112 on RA4 drag model; match velocity band 1040-1085 fps (use box MV)' },
+      { id: '22-eleyhp', name: 'Eley HP 38gr', weightGr: 38, model: 'RA4', bc: 0.112, factoryMv: 1250, testBarrelIn: 20.5,
+        source: 'Eley High Velocity Hollow 38gr: 1250 fps, RA4 BC 0.112' },
+      { id: '22-aguila', name: 'Aguila Standard Velocity', weightGr: 40, model: 'G1', bc: 0.125, factoryMv: 1130, testBarrelIn: 20.5,
+        source: 'Aguila Super Extra SV: 1130 fps, 981 fps @100yd (BC .125 typical 40gr LRN; factory printed 100yd figure implies an unrealistically high BC)' },
+      { id: '22-quiet', name: 'CCI Quiet-22 (710 fps)', weightGr: 40, model: 'G1', bc: 0.120, factoryMv: 710, testBarrelIn: 20.5,
+        source: 'CCI Quiet-22: 710 fps, G1 .120' }
+];
+function rimfireLoads(prefix, barrelIn, notes = {}) {
+  return RIMFIRE_LOAD_DATA.map(l => ({ ...l, id: prefix + l.id, testBarrelIn: barrelIn,
+    source: l.source + (notes[l.id] ? ' ' + notes[l.id] : '') }));
+}
 const PRESET_RIFLES = [
   { id: 'cz557', name: 'CZ 557', caliber: '.308 Winchester', barrelIn: 20, sightHeightIn: 1.75, twist: '1:11', fpsPerInch: 22,
     loads: [
@@ -421,22 +443,9 @@ const PRESET_RIFLES = [
         source: 'Federal Power-Shok 76239B: 2350 fps @20", G1 .274' },
     ] },
   { id: 'cz457', name: 'CZ 457', caliber: '.22 LR', barrelIn: 20.5, sightHeightIn: 1.5, twist: '1:16', fpsPerInch: 0,
-    loads: [
-      { id: '22-ccisv', name: 'CCI Standard Velocity', weightGr: 40, model: 'G1', bc: 0.128, factoryMv: 1070, testBarrelIn: 20.5,
-        source: 'CCI SV 40gr LRN: 1070 fps; BC est. .128' },
-      { id: '22-minimag', name: 'CCI Mini-Mag', weightGr: 40, model: 'G1', bc: 0.130, factoryMv: 1235, testBarrelIn: 20.5,
-        source: 'CCI Mini-Mag #30: 1235 fps, G1 .130 (998 fps @100yd)' },
-      { id: '22-blazer', name: 'CCI Blazer', weightGr: 40, model: 'G1', bc: 0.133, factoryMv: 1235, testBarrelIn: 20.5,
-        source: 'CCI Blazer #21: 1235 fps, G1 .133 (1001 fps @100yd)' },
-      { id: '22-eleymatch', name: 'Eley Match 42gr', weightGr: 42, model: 'RA4', bc: 0.112, factoryMv: 1065, testBarrelIn: 20.5,
-        source: 'Eley: BC 0.112 on RA4 drag model; match velocity band 1040-1085 fps (use box MV)' },
-      { id: '22-eleyhp', name: 'Eley HP 38gr', weightGr: 38, model: 'RA4', bc: 0.112, factoryMv: 1250, testBarrelIn: 20.5,
-        source: 'Eley High Velocity Hollow 38gr: 1250 fps, RA4 BC 0.112' },
-      { id: '22-aguila', name: 'Aguila Standard Velocity', weightGr: 40, model: 'G1', bc: 0.125, factoryMv: 1130, testBarrelIn: 20.5,
-        source: 'Aguila Super Extra SV: 1130 fps, 981 fps @100yd (BC .125 typical 40gr LRN; factory printed 100yd figure implies an unrealistically high BC)' },
-      { id: '22-quiet', name: 'CCI Quiet-22 (710 fps)', weightGr: 40, model: 'G1', bc: 0.120, factoryMv: 710, testBarrelIn: 20.5,
-        source: 'CCI Quiet-22: 710 fps, G1 .120' },
-    ] },
+    loads: rimfireLoads('', 20.5) },
+  { id: 'ruger1022', name: 'Ruger 10/22 Carbine', caliber: '.22 LR', barrelIn: 18.5, sightHeightIn: 1.5, twist: '1:16', fpsPerInch: 0,
+    loads: rimfireLoads('1022-', 18.5, { '22-quiet': 'Note: subsonic/low-power loads like Quiet-22 usually will not cycle a 10/22 action – expect to cycle the bolt by hand.' }) },
 ];
 
 
@@ -818,7 +827,7 @@ function renderCalc(el) {
     $$('#stepseg button').forEach(b => { b.classList.toggle('active', +b.dataset.s === step); b.onclick = () => { S.ui[RG.tstep] = +b.dataset.s; persist(); update(); }; });
     // load data
     $('#loaddata').innerHTML = `<div class="grid g4">
-      <div><div class="lbl">Muzzle velocity</div><div class="num" style="font-size:1.2rem">${fmt(load.mv)} fps</div><div class="small muted">${load.mvSource === 'chrono' ? 'your chronograph / trued value' : load.custom ? 'user entered' : `factory ${load.factoryMv} @ ${load.testBarrelIn}" → ${rifle.barrelIn}" barrel`}</div></div>
+      <div><div class="lbl">Muzzle velocity</div><div class="num" style="font-size:1.2rem">${fmt(load.mv)} fps</div><div class="small muted">${load.mvSource === 'chrono' ? 'your chronograph / trued value' : load.custom ? 'user entered' : (load.testBarrelIn === rifle.barrelIn || !rifle.fpsPerInch ? 'factory published velocity' : `factory ${load.factoryMv} @ ${load.testBarrelIn}" → ${rifle.barrelIn}" barrel`)}</div></div>
       <div><div class="lbl">Ballistic coef.</div><div class="num" style="font-size:1.2rem">${load.bc.toFixed(3)} ${load.model}</div><div class="small muted">${load.bcTrued ? 'trued from your DOPE' : load.bcG1 ? 'G1 ' + load.bcG1 : 'published'}</div></div>
       <div><div class="lbl">Bullet</div><div class="num" style="font-size:1.2rem">${load.weightGr} gr</div><div class="small muted">${esc(rifle.caliber)}</div></div>
       <div><div class="lbl">Sight height / zero</div><div class="num" style="font-size:1.2rem">${rifle.sightHeightIn}" / ${rifle.zeroDist}${rifle.zeroUnit}</div><div class="small muted">edit on DOPE tab</div></div></div>
