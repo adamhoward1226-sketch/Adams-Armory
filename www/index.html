@@ -1239,21 +1239,114 @@ function invOf(cal) {
   const tracked = !!rec || bought > 0;
   return { tracked, onHand: (rec?.adjust || 0) + bought - used, low: rec?.low || 0 };
 }
+// ---- inventory import (CSV: Type, Calibre, Load, Rounds, [As counted], [Notes]) ----
+function parseCsv(text) {
+  const rows = []; let row = [], cell = '', q = false;
+  text = text.replace(/^﻿/, '');
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (q) { if (ch === '"') { if (text[i + 1] === '"') { cell += '"'; i++; } else q = false; } else cell += ch; }
+    else if (ch === '"') q = true;
+    else if (ch === ',' || ch === ';' || ch === '\t') { row.push(cell); cell = ''; }
+    else if (ch === '\n' || ch === '\r') { if (ch === '\r' && text[i + 1] === '\n') i++; row.push(cell); rows.push(row); row = []; cell = ''; }
+    else cell += ch;
+  }
+  if (cell || row.length) { row.push(cell); rows.push(row); }
+  return rows.map(r => r.map(c => c.trim())).filter(r => r.some(c => c));
+}
+const CAL_ALIASES = {
+  '22lr': '.22 LR', '22': '.22 LR', '22longrifle': '.22 LR',
+  '223': '.223', '223rem': '.223', '223remington': '.223',
+  '308': '.308', '308win': '.308', '308winchester': '.308', '762x51': '.308', '762x51nato': '.308',
+  '762x39': '7.62x39', '3030': '.30-30', '3030win': '.30-30', '3030winchester': '.30-30',
+  '3006': '.30-06', '3006springfield': '.30-06', '303': '.303 British', '303british': '.303 British', '303brit': '.303 British',
+  '9mm': '9mm', '9x19': '9mm', '9x19mm': '9mm', '9mmluger': '9mm', '9mmparabellum': '9mm',
+  '45acp': '.45 ACP', '45auto': '.45 ACP', '44russian': '.44 Russian',
+};
+const TYPE_CAT = { rimfire: 'rim', rifle: 'cfr', centerfirerifle: 'cfr', pistol: 'cfp', handgun: 'cfp', centerfirepistol: 'cfp', shotgun: 'sg' };
+function mapCaliber(rawCal, type, load) {
+  const key = rawCal.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const ga = key.match(/^(10|12|16|20|28|410)(ga|gauge|g)?$/) || rawCal.match(/^(10|12|16|20|28|410)\s*(ga|gauge)/i);
+  if (ga) {
+    const g = ga[1], l = (load || '').toLowerCase();
+    const kind = /buck/.test(l) ? 'Buck' : /slug/.test(l) ? 'Slug' : /bird|grouse|clay|target|trap|skeet|game|dove|duck|pheasant|shot/.test(l) ? 'Bird' : 'Custom';
+    const want = `${g} ga ${kind}`;
+    if (allCals().includes(want)) return { cal: want };
+    if (g === '12') return { cal: '12 ga Custom' };
+    const fallback = allCals().find(c => c.startsWith(g + ' ga Bird'));
+    return { cal: want, newCat: 'sg', alt: fallback };
+  }
+  if (CAL_ALIASES[key]) return { cal: CAL_ALIASES[key] };
+  const existing = allCals().find(c => c.toLowerCase().replace(/[^a-z0-9]/g, '') === key);
+  if (existing) return { cal: existing };
+  const cat = TYPE_CAT[(type || '').toLowerCase().replace(/[^a-z]/g, '')] || 'cfr';
+  return { cal: rawCal.trim(), newCat: cat };
+}
+function parseInventoryCsv(text) {
+  const rows = parseCsv(text);
+  const hi = rows.findIndex(r => r.some(c => /calib/i.test(c)) && r.some(c => /round|qty|count/i.test(c)));
+  if (hi < 0) throw new Error('Could not find a header row with Calibre and Rounds columns');
+  const h = rows[hi].map(c => c.toLowerCase());
+  const col = re => h.findIndex(c => re.test(c));
+  const ci = { type: col(/type|categ/), cal: col(/calib/), load: col(/load|brand|ammo|desc/), rounds: col(/^rounds?$|qty|quantity|^count$/), note: col(/note/) };
+  if (ci.rounds < 0) ci.rounds = col(/round/);
+  const lines = [];
+  for (const r of rows.slice(hi + 1)) {
+    const rawCal = r[ci.cal] || ''; const n = parseFloat(String(r[ci.rounds] || '').replace(/[, ]/g, ''));
+    if (!rawCal || !isFinite(n) || /^total/i.test(r[0] || '')) continue;
+    const type = ci.type >= 0 ? r[ci.type] : '', load = ci.load >= 0 ? r[ci.load] : '';
+    lines.push({ rawCal, type, load: load || 'Unspecified', rounds: Math.round(n), note: ci.note >= 0 ? r[ci.note] : '', ...mapCaliber(rawCal, type, load) });
+  }
+  if (!lines.length) throw new Error('No inventory rows found in that file');
+  return lines;
+}
+function importInventoryPreview(lines, done) {
+  const by = {};
+  lines.forEach(l => { (by[l.cal] = by[l.cal] || { cal: l.cal, newCat: l.newCat, total: 0, lines: [] }); by[l.cal].total += l.rounds; by[l.cal].lines.push(l); });
+  const groups = Object.values(by);
+  const total = groups.reduce((a, g) => a + g.total, 0);
+  const catName = id => CATEGORIES.find(c => c.id === id)?.name;
+  modal(`<h2>Import inventory count</h2><p class="muted small">${lines.length} lines → ${groups.length} calibers, ${fmt(total)} rounds.</p>
+    <div class="tblwrap" style="max-height:44vh;overflow:auto"><table class="tbl"><thead><tr><th>Caliber in app</th><th>Rounds</th><th>From file</th></tr></thead><tbody>
+    ${groups.map(g => `<tr><td>${esc(g.cal)}${g.newCat ? ` <span class="tag">new · ${catName(g.newCat)}</span>` : ''}</td><td>${fmt(g.total)}</td><td class="small" style="white-space:normal;font-family:var(--font)">${[...new Set(g.lines.map(l => l.rawCal))].map(esc).join(', ')}${g.lines.length > 1 ? ` (${g.lines.length} lines)` : ''}</td></tr>`).join('')}
+    </tbody></table></div>
+    <div class="field" style="margin-top:12px"><label>How to apply</label><select id="impmode"><option value="set">Set on-hand to these counts (full recount)</option><option value="add">Add to current on-hand</option></select></div>
+    <p class="small muted">Calibers not in the file are left as they are. New calibers are added to your caliber list. Rounds you log later are deducted from these counts.</p>`,
+    [{ label: 'Cancel' }, { label: 'Import', cls: 'primary', fn: bg => {
+      const mode = $('#impmode', bg).value, t = todayStr();
+      groups.forEach(g => {
+        if (g.newCat && !allCals().includes(g.cal)) S.customCalibers.push({ cat: g.newCat, name: g.cal });
+        const cur = invOf(g.cal).onHand;
+        const rec = S.inventory[g.cal] = S.inventory[g.cal] || { adjust: 0, low: 0 };
+        rec.adjust = (rec.adjust || 0) + (mode === 'set' ? g.total - cur : g.total);
+        rec.lots = g.lines.map(l => ({ load: l.load, rounds: l.rounds, note: l.note }));
+        rec.lotsDate = t;
+      });
+      persist(); done(); toast(`Imported ${fmt(total)} rounds`);
+    } }]);
+}
 function renderInv(el) {
   const { rate } = annualRate();
   const cats = allCats();
   el.innerHTML = `
     <div class="page-head"><div><h1>Inventory</h1><p>Rounds on hand · logged sessions are deducted automatically</p></div>
-      <button class="btn primary" id="buy">${I.plus} Add purchase</button></div>
+      <div class="row"><label class="btn" style="cursor:pointer">Import count<input type="file" id="invimp" accept=".csv,text/csv,text/plain,text/comma-separated-values,application/vnd.ms-excel" class="hidden"></label>
+      <button class="btn primary" id="buy">${I.plus} Add purchase</button></div></div>
     ${cats.map(c => `<div class="card"><div class="card-head"><h2><span class="dot" style="background:${c.color}"></span>${c.name}</h2></div>
       <div class="tblwrap"><table class="tbl"><thead><tr><th>Caliber</th><th>On hand</th><th>Low alert</th><th>Supply</th><th>$/rd</th><th></th></tr></thead><tbody>
       ${c.cals.map(cal => { const inv = invOf(cal); const r = rate[cal] || 0; const daysLeft = r > 0 ? inv.onHand / r * 365 : null;
         const lowNow = inv.tracked && inv.onHand <= inv.low;
-        return `<tr><td>${esc(cal)}</td><td style="color:${lowNow ? 'var(--bad)' : 'inherit'};font-weight:700">${inv.tracked ? fmt(inv.onHand) : '<span class="muted">–</span>'}${lowNow ? ' ⚠' : ''}</td>
+        const lots = S.inventory[cal]?.lots;
+        return `<tr><td>${esc(cal)}${lots && lots.length ? `<div class="small muted" style="font-family:var(--font);white-space:normal;margin-top:3px">${lots.map(l => `${esc(l.load)}: ${fmt(l.rounds)}`).join(' · ')}<br>counted ${esc(S.inventory[cal].lotsDate || '')}</div>` : ''}</td><td style="color:${lowNow ? 'var(--bad)' : 'inherit'};font-weight:700">${inv.tracked ? fmt(inv.onHand) : '<span class="muted">–</span>'}${lowNow ? ' ⚠' : ''}</td>
           <td>${inv.low || '–'}</td><td>${inv.tracked && daysLeft != null ? (daysLeft > 730 ? '2 yr+' : fmt(daysLeft / 30.4, 1) + ' mo') : '–'}</td><td>${priceOf(cal).v.toFixed(2)}</td>
           <td><button class="btn sm" data-set="${esc(cal)}">Set</button></td></tr>`; }).join('')}
       </tbody></table></div></div>`).join('')}
     <div class="card"><div class="card-head"><h2>Purchases</h2></div><div id="purch"></div></div>`;
+  $('#invimp').onchange = async e => {
+    const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+    let parsed; try { parsed = parseInventoryCsv(await f.text()); } catch (ex) { return toast(ex.message); }
+    importInventoryPreview(parsed, () => renderInv(el));
+  };
   $('#buy').onclick = () => modal(`<h2>Add purchase</h2><div class="grid g2">
       <div class="field"><label>Caliber</label><select id="pc">${cats.map(c => `<optgroup label="${c.name}">${c.cals.map(x => `<option>${esc(x)}</option>`).join('')}</optgroup>`).join('')}</select></div>
       <div class="field"><label>Date</label><input type="date" id="pd" value="${todayStr()}"></div>
